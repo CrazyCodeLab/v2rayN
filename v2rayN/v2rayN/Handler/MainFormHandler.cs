@@ -12,6 +12,8 @@ namespace v2rayN.Handler
     {
         private static readonly Lazy<MainFormHandler> instance = new(() => new());
         public static MainFormHandler Instance => instance.Value;
+        //定义一个节点 id 的映射表，记录节点 id 对应的延迟、速度、测试时间(long类型)
+        public static Dictionary<string, (int delay, string speed, long time)> dictSpeedtest = new();
 
         public Icon GetNotifyIcon(Config config)
         {
@@ -178,11 +180,24 @@ namespace v2rayN.Handler
 
                 foreach (var item in lstSubs)
                 {
-                    updateHandle.UpdateSubscriptionProcess(config, item.id, true, (bool success, string msg) =>
+                    updateHandle.UpdateSubscriptionProcess(config, item.id, true, async (bool success, string msg) =>
                     {
                         update(success, msg);
                         if (success)
+                        {
                             Logging.SaveLog("subscription" + msg);
+                            // 如果是当前配置, 则测速并自动选择
+                            if (item.id == config.subIndexId)
+                            {
+                                // 控制台输出日志
+                                Logging.SaveLog("UpdateTaskRunSubscription Test");
+                                var downloadHandle = new DownloadHandle();
+                                var subStr = await downloadHandle.TryDownloadString(item.url, false, "");
+                                var lstSelecteds = ConfigHandler.AddBatchServers2(config, subStr, config.subIndexId, true);
+                                var _coreHandler = new CoreHandler(config, UpdateHandler);
+                                new SpeedtestHandler(config, _coreHandler, lstSelecteds, ESpeedActionType.Mixedtest, UpdateSpeedtestHandler);
+                            }
+                        }
                     });
                     item.updateTime = updateTime;
                     ConfigHandler.AddSubItem(config, item);
@@ -190,6 +205,40 @@ namespace v2rayN.Handler
                     await Task.Delay(5000);
                 }
                 await Task.Delay(60000);
+            }
+        }
+
+        private void UpdateHandler(bool notify, string msg)
+        {
+        }
+
+        private void UpdateSpeedtestHandler(string indexId, string delay, string speed)
+        {
+            // 打印 indexId, delay, speed
+            Logging.SaveLog($"UpdateSpeedtestHandler {indexId} {delay} {speed}");
+            // 判断 delay 是否为数字字符串
+            if (decimal.TryParse(delay, out decimal delayNumber) && delayNumber > 0)
+            {
+                // 如果 dictSpeedtest 中包含 indexId 则更新，否则添加
+                if (dictSpeedtest.ContainsKey(indexId))
+                {
+                    dictSpeedtest[indexId] = ((int)delayNumber, dictSpeedtest[indexId].speed, DateTimeOffset.Now.ToUnixTimeMilliseconds());
+                }
+                else
+                {
+                    dictSpeedtest.Add(indexId, ((int)delayNumber, speed, DateTimeOffset.Now.ToUnixTimeMilliseconds()));
+                }
+            } else if (decimal.TryParse(speed, out decimal speedNumber))
+            {
+                // 如果 dictSpeedtest 中包含 indexId 则更新，否则添加
+                if (dictSpeedtest.ContainsKey(indexId))
+                {
+                    dictSpeedtest[indexId] = (dictSpeedtest[indexId].delay, speed, DateTimeOffset.Now.ToUnixTimeMilliseconds());
+                }
+                else
+                {
+                    dictSpeedtest.Add(indexId, (0, speed, DateTimeOffset.Now.ToUnixTimeMilliseconds()));
+                }
             }
         }
 

@@ -1401,6 +1401,42 @@ namespace v2rayN.Handler
             return counter;
         }
 
+        public static List<ProfileItem> AddBatchServers2(Config config, string clipboardData, string subid, bool isSub)
+        {
+            List<ProfileItem>? lstOriSub = null;
+            if (isSub && !Utils.IsNullOrEmpty(subid))
+            {
+                lstOriSub = LazyConfig.Instance.ProfileItems(subid);
+            }
+
+            var counter = 0;
+            if (Utils.IsBase64String(clipboardData))
+            {
+                counter = AddBatchServers(config, Utils.Base64Decode(clipboardData), subid, isSub, lstOriSub);
+            }
+            if (counter < 1)
+            {
+                counter = AddBatchServers(config, clipboardData, subid, isSub, lstOriSub);
+            }
+            if (counter < 1)
+            {
+                counter = AddBatchServers(config, Utils.Base64Decode(clipboardData), subid, isSub, lstOriSub);
+            }
+
+            if (counter < 1)
+            {
+                counter = AddBatchServers4SsSIP008(config, clipboardData, subid, isSub, lstOriSub);
+            }
+
+            //maybe other sub
+            if (counter < 1)
+            {
+                counter = AddBatchServers4Custom(config, clipboardData, subid, isSub, lstOriSub);
+            }
+
+            return lstOriSub;
+        }
+
         #endregion Batch add servers
 
         #region Sub & Group
