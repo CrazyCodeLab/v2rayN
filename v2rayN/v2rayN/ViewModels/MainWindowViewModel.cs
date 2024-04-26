@@ -25,6 +25,7 @@ namespace v2rayN.ViewModels
     {
         #region private prop
 
+        private static MainWindowViewModel _instance;
         private CoreHandler _coreHandler;
         private StatisticsHandler _statistics;
         private List<ProfileItem> _lstProfile;
@@ -575,6 +576,15 @@ namespace v2rayN.ViewModels
             AutoHideStartup();
 
             _showInTaskbar = true;
+            _instance = this;
+        }
+
+        public static MainWindowViewModel Instance
+        {
+            get
+            {
+                return _instance;
+            }
         }
 
         private void Init()
@@ -695,7 +705,7 @@ namespace v2rayN.ViewModels
             }));
         }
 
-        private void SetTestResult(string indexId, string delay, string speed)
+        public void SetTestResult(string indexId, string delay, string speed)
         {
             if (Utils.IsNullOrEmpty(indexId))
             {
@@ -1098,7 +1108,7 @@ namespace v2rayN.ViewModels
             SetDefaultServer(SelectedProfile.indexId);
         }
 
-        private void SetDefaultServer(string indexId)
+        public void SetDefaultServer(string indexId)
         {
             if (Utils.IsNullOrEmpty(indexId))
             {

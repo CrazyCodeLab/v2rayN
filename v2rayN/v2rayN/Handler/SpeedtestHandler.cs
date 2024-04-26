@@ -191,6 +191,7 @@ namespace v2rayN.Handler
                 ProfileExHandler.Instance.SaveTo();
             }
 
+            UpdateFunc("all completed", "");
             return Task.CompletedTask;
         }
 

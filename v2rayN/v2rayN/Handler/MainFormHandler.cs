@@ -4,7 +4,9 @@ using System.Drawing;
 using System.IO;
 using System.Windows.Media.Imaging;
 using v2rayN.Models;
+using v2rayN.ViewModels;
 using v2rayN.Resx;
+using System.Windows;
 
 namespace v2rayN.Handler
 {
@@ -12,8 +14,10 @@ namespace v2rayN.Handler
     {
         private static readonly Lazy<MainFormHandler> instance = new(() => new());
         public static MainFormHandler Instance => instance.Value;
+        private static Config _config = null;
         //定义一个节点 id 的映射表，记录节点 id 对应的延迟、速度、测试时间(long类型)
         public static Dictionary<string, (int delay, string speed, long time)> dictSpeedtest = new();
+        private static string _currentServerId = "";
 
         public Icon GetNotifyIcon(Config config)
         {
@@ -166,10 +170,13 @@ namespace v2rayN.Handler
 
         private async Task UpdateTaskRunSubscription(Config config, Action<bool, string> update)
         {
+            _config = config;
             await Task.Delay(60000);
             Logging.SaveLog("UpdateTaskRunSubscription");
 
             var updateHandle = new UpdateHandle();
+            var downloadHandle = new DownloadHandle();
+            var mainWindow = MainWindowViewModel.Instance;
             while (true)
             {
                 var updateTime = ((DateTimeOffset)DateTime.Now).ToUnixTimeSeconds();
@@ -177,25 +184,31 @@ namespace v2rayN.Handler
                             .Where(t => t.autoUpdateInterval > 0)
                             .Where(t => updateTime - t.updateTime >= t.autoUpdateInterval * 60)
                             .ToList();
+                var curUrl = "";
+                foreach (var item in lstSubs)
+                {
+                     if (item.id == config.subIndexId)
+                     {
+                        curUrl = item.url;
+                        break;
+                     }
+                }
+                var subStr = await downloadHandle.TryDownloadString(curUrl, false, "");
 
                 foreach (var item in lstSubs)
                 {
-                    updateHandle.UpdateSubscriptionProcess(config, item.id, true, async (bool success, string msg) =>
+                    updateHandle.UpdateSubscriptionProcess(config, item.id, true, (bool success, string msg) =>
                     {
                         update(success, msg);
                         if (success)
                         {
                             Logging.SaveLog("subscription" + msg);
                             // 如果是当前配置, 则测速并自动选择
-                            if (item.id == config.subIndexId)
+                            if (item.id == config.subIndexId && curUrl != "")
                             {
-                                // 控制台输出日志
-                                Logging.SaveLog("UpdateTaskRunSubscription Test");
-                                var downloadHandle = new DownloadHandle();
-                                var subStr = await downloadHandle.TryDownloadString(item.url, false, "");
                                 var lstSelecteds = ConfigHandler.AddBatchServers2(config, subStr, config.subIndexId, true);
                                 var _coreHandler = new CoreHandler(config, UpdateHandler);
-                                new SpeedtestHandler(config, _coreHandler, lstSelecteds, ESpeedActionType.Mixedtest, UpdateSpeedtestHandler);
+                                new SpeedtestHandler(config, _coreHandler, lstSelecteds, ESpeedActionType.Realping, UpdateSpeedtestHandler);
                             }
                         }
                     });
@@ -210,12 +223,40 @@ namespace v2rayN.Handler
 
         private void UpdateHandler(bool notify, string msg)
         {
+            var _noticeHandler = Locator.Current.GetService<NoticeHandler>();
+            msg = "CrazyBunQnQ: " + msg;
+            _noticeHandler?.SendMessage(msg);
+            if (notify)
+            {
+                _noticeHandler?.Enqueue(msg);
+            }
         }
 
         private void UpdateSpeedtestHandler(string indexId, string delay, string speed)
         {
-            // 打印 indexId, delay, speed
-            Logging.SaveLog($"UpdateSpeedtestHandler {indexId} {delay} {speed}");
+            if (indexId == null)
+                return;
+            var mainWindow = MainWindowViewModel.Instance;
+            if ("all completed".Equals(indexId) && _config != null)
+            {
+                mainWindow.SortServer("delayVal");
+                // 获取最低延迟的节点
+                var lowestIndexId = GetLowestDelayKeyWithin2Hours();
+                var lowobj = dictSpeedtest[lowestIndexId];
+                if (lowestIndexId.Equals(_currentServerId))
+                {
+                    return;
+                }
+                UpdateHandler(false, "测速完成，最低延迟节点：" + lowestIndexId + "，自动切换中...");
+                // 设置激活服务器
+                mainWindow.SetDefaultServer(lowestIndexId);
+                _currentServerId = lowestIndexId;
+                return;
+            }
+            Application.Current?.Dispatcher.Invoke((Action)(() =>
+            {
+                mainWindow.SetTestResult(indexId, delay, speed);
+            }));
             // 判断 delay 是否为数字字符串
             if (decimal.TryParse(delay, out decimal delayNumber) && delayNumber > 0)
             {
@@ -228,7 +269,7 @@ namespace v2rayN.Handler
                 {
                     dictSpeedtest.Add(indexId, ((int)delayNumber, speed, DateTimeOffset.Now.ToUnixTimeMilliseconds()));
                 }
-            } else if (decimal.TryParse(speed, out decimal speedNumber))
+            } else if (decimal.TryParse(speed, out decimal speedNumber) && speedNumber > 0)
             {
                 // 如果 dictSpeedtest 中包含 indexId 则更新，否则添加
                 if (dictSpeedtest.ContainsKey(indexId))
@@ -240,6 +281,23 @@ namespace v2rayN.Handler
                     dictSpeedtest.Add(indexId, (0, speed, DateTimeOffset.Now.ToUnixTimeMilliseconds()));
                 }
             }
+        }
+
+        private string GetLowestDelayKeyWithin2Hours()
+        {
+            // 获取当前时间的 Unix 时间戳（秒）
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            // 2小时的秒数
+            long twoHoursInSeconds = 2 * 60 * 60 * 1000;
+
+            // 筛选出测试时间在2小时以内的节点
+            var recentTests = dictSpeedtest.Where(kvp => (now - kvp.Value.time) <= twoHoursInSeconds);
+
+            // 从筛选结果中找到延迟最低的条目
+            var minDelayEntry = recentTests.OrderBy(kvp => kvp.Value.delay).FirstOrDefault();
+
+            // 返回具有最低延迟的 key，如果没有符合条件的条目，返回 null
+            return minDelayEntry.Key; // 如果列表为空，Key 将是 null
         }
 
         private async Task UpdateTaskRunGeo(Config config, Action<bool, string> update)
